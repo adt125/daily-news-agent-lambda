@@ -1,72 +1,72 @@
-from google.adk.agents import Agent
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.adk.tools import google_search
-from google.genai import types
-import asyncio
+from google import genai
+from google.genai.types import HttpOptions
 from dotenv import load_dotenv, find_dotenv
+from news_service import get_news
+from html_formatter import generate_html_email
 import os
+import json
 
 load_dotenv(find_dotenv())
 
-APP_NAME = "MarketMindAI"
-USER_ID = "AWSLambda"
-SESSION_ID = "AWSLambdaSession"
 
-root_agent = Agent(
-    name="MarketMindAI",
-    model="gemini-2.5-flash",
-    description="AI & Indian Market News Curator",
-    instruction="""
-Write a minimalist email body. No Subject. No filler.
-
-1. Greeting: "Hello AI & Market Enthusiast,"
-2. AI Section: Top 5 updates. One sentence per item.
-3. Market Section: Top 3 NSE/BSE updates. Focus on market impact.
-4. Closing: "Stay informed, MarketMind AI"
-
-**CRITICAL LINK RULE:** 
-- Every link MUST be the exact, full URL provided by the search tool. 
-- DO NOT truncate, shorten, or guess the URL. 
-- If a direct link isn't clear, use the main news source homepage.
-
-Format: Use bold for key names. Total under 150 words.
-""",
-    # google_search is a pre-built tool which allows the agent to perform Google searches.
-    tools=[google_search],
-)
-
-
-# Session and Runner
-async def setup_session_and_runner():
-    session_service = InMemorySessionService()
-    session = await session_service.create_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID
-    )
-    runner = Runner(
-        agent=root_agent, app_name=APP_NAME, session_service=session_service
-    )
-    return session, runner
-
-
-# Agent Interaction
-async def get_news_summary():
-    query = "Generate the daily briefing email."
-    content = types.Content(role="user", parts=[types.Part(text=query)])
-    session, runner = await setup_session_and_runner()
-    events = runner.run_async(
-        user_id=USER_ID, session_id=SESSION_ID, new_message=content
+def generate_email_content():
+    client = genai.Client(
+        api_key=os.getenv("GOOGLE_API_KEY"), http_options=HttpOptions(api_version="v1")
     )
 
-    final_response = None
+    ai_news, market_news = get_news()
 
-    async for event in events:
-        if event.is_final_response():
-            final_response = event.content.parts[0].text
-            print("Agent Response: ", final_response)
+    prompt = f"""
+Return ONLY valid JSON. No explanation.
 
-    return final_response
+Format:
+{{
+  "ai": [
+    {{
+      "title": "",
+      "summary": "",
+      "link": ""
+    }}
+  ],
+  "market": [
+    {{
+      "title": "",
+      "summary": "",
+      "link": ""
+    }}
+  ]
+}}
+
+Rules:
+- 5 AI items, 3 market items
+- Summary must be 2-3 lines
+- Use EXACT links from input
+- Do NOT modify links
+- No markdown, no extra text
+
+INPUT:
+
+AI News:
+{ai_news}
+
+Market News:
+{market_news}
+"""
+
+    response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+
+    # Parse JSON safely
+    try:
+        data = json.loads(response.text)
+    except Exception:
+        print("Invalid JSON from model:\n", response.text)
+        raise
+
+    return data
 
 
 if __name__ == "__main__":
-    asyncio.run(get_news_summary())
+    structured_data = generate_email_content()
+    html_email = generate_html_email(structured_data)
+
+    print(html_email)  # or pass to SES

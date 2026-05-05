@@ -1,3 +1,4 @@
-google-adk
+google-genai
 boto3
 python-dotenv
+feedparser
