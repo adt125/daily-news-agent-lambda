@@ -1,15 +1,19 @@
-import feedparser
+from urllib.request import urlopen
+import xml.etree.ElementTree as ET
 
 AI_RSS = "https://news.google.com/rss/search?q=artificial+intelligence"
 MARKET_RSS = "https://news.google.com/rss/search?q=stock+market+india"
 
 
 def fetch_rss(url, limit=5):
-    feed = feedparser.parse(url)
+    with urlopen(url, timeout=10) as response:
+        root = ET.fromstring(response.read())
 
     articles = []
-    for entry in feed.entries[:limit]:
-        articles.append({"title": entry.title, "link": entry.link})
+    for item in root.findall("./channel/item")[:limit]:
+        title = item.findtext("title", default="")
+        link = item.findtext("link", default="")
+        articles.append({"title": title, "link": link})
 
     return articles
 

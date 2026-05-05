@@ -1,270 +1,184 @@
-# 🧠 Daily News AI Agent (AWS Lambda + Docker + Terraform)
+# Daily News Agent Lambda
 
-An AI-powered serverless system that fetches latest news (AI, stocks, tech), summarizes it using Google ADK, and sends a daily email digest.
+Serverless daily email digest that fetches AI and Indian market RSS headlines, summarizes them with Gemini through `google-genai`, formats an HTML email, and sends it through Amazon SES.
 
----
+## Tech Stack
 
-# 🚀 Tech Stack
+- AWS Lambda
+- Amazon SES
+- Google Gemini via `google-genai`
+- Google News RSS
+- Python 3.13 by default
+- Zip-based Lambda deployment
 
-- AWS Lambda (Docker-based)
-- Amazon ECR (Container Registry)
-- Amazon EventBridge (Scheduler)
-- Amazon SES (Email)
-- Terraform (Infrastructure as Code)
-- Google ADK (AI Agent)
-- Docker (Containerization)
+## Project Structure
 
----
-
-# ⚠️ Why Docker Lambda?
-
-The project uses heavy AI dependencies (Google ADK), which exceed AWS Lambda zip limits:
-
-| Limit Type       | Value      |
-| ---------------- | ---------- |
-| Zip Upload Limit | ~50–70 MB  |
-| Unzipped Limit   | 250 MB     |
-| Our App Size     | ~700 MB ❌ |
-
-👉 Solution: **Use Docker-based Lambda (10 GB limit)**
-
----
-
-# 🐳 Docker Setup (Mac - Apple Silicon Compatible)
-
-## 📁 Project Structure
-
-```
-daily-news-agent/
-│
+```text
+.
 ├── lambda/
-│   ├── handler.py
 │   ├── agent.py
+│   ├── config.py
 │   ├── email_service.py
-│   └── config.py
-│
+│   ├── handler.py
+│   ├── html_formatter.py
+│   └── news_service.py
+├── package.sh
 ├── requirements.txt
-└── Dockerfile
+└── README.md
 ```
 
----
+## Environment Variables
 
-## 🧾 Dockerfile
+Configure these in Lambda:
 
-```
-FROM public.ecr.aws/lambda/python:3.11
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY lambda/ .
-
-CMD ["handler.lambda_handler"]
+```text
+GOOGLE_API_KEY=<your Gemini API key>
+SES_SENDER=<verified SES sender email>
+SES_RECEIVER=<recipient email>
 ```
 
----
+`SES_SENDER` and `SES_RECEIVER` must be valid for your SES setup. If SES is still in sandbox mode, both addresses usually need to be verified.
 
-# 🏗️ Build Docker Image (IMPORTANT)
+## Dependencies
 
-Mac (M1/M2/M3) builds ARM images by default ❌
-AWS Lambda expects AMD64 ✅
+`requirements.txt` intentionally stays small:
 
-👉 Use this command:
-
-```
-docker buildx build \
-  --platform linux/amd64 \
-  --provenance=false \
-  --output=type=docker \
-  -t daily-news-agent .
+```text
+google-genai
+boto3
+python-dotenv
 ```
 
----
+`boto3` is listed for local development, but `package.sh` excludes it from the zip because AWS Lambda already includes `boto3` and `botocore` in the Python runtime.
 
-## 🔍 Verify Image
+The project no longer uses Google ADK. Direct `google-genai` keeps the deployment much smaller.
 
-```
-docker images
-```
+## Build Lambda Zip
 
-Optional:
+Run:
 
-```
-docker inspect daily-news-agent | grep Architecture
+```bash
+./package.sh
 ```
 
-👉 Should show: `amd64`
+This creates:
 
----
-
-# ☁️ Push to Amazon ECR
-
-## 1. Create Repository
-
-```
-aws ecr create-repository \
-  --repository-name daily-news-agent \
-  --region ap-south-1
+```text
+lambda.zip
 ```
 
----
+The script installs dependencies using Lambda-compatible Linux wheels:
 
-## 2. Login to ECR
-
-```
-aws ecr get-login-password --region ap-south-1 \
-| docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com
-```
-
----
-
-## 3. Tag Image
-
-```
-docker tag daily-news-agent:latest \
-<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/daily-news-agent:latest
+```bash
+pip3 install \
+  --platform manylinux2014_x86_64 \
+  --implementation cp \
+  --python-version 3.13 \
+  --only-binary=:all:
 ```
 
----
+It also removes `__pycache__`, `.pyc`, tests, console scripts, and excludes AWS SDK packages already available in Lambda.
 
-## 4. Push Image
+## Runtime And Architecture
 
-```
-docker push \
-<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/daily-news-agent:latest
-```
+Defaults:
 
----
-
-# 🧪 Verify Image Format (CRITICAL)
-
-```
-aws ecr describe-images \
-  --repository-name daily-news-agent \
-  --region ap-south-1
+```text
+Python: 3.13
+Architecture: x86_64
+Platform: manylinux2014_x86_64
 ```
 
-👉 Must show:
+If your Lambda runtime is Python 3.12:
 
-```
-application/vnd.docker.distribution.manifest.v2+json
-```
-
-❌ If you see:
-
-```
-application/vnd.oci.image.manifest.v1+json
+```bash
+LAMBDA_PYTHON_VERSION=3.12 ./package.sh
 ```
 
-👉 Lambda will fail → rebuild with correct command
+If your Lambda architecture is ARM64:
 
----
-
-# ⚙️ Terraform Configuration (Lambda)
-
-```
-resource "aws_lambda_function" "news_lambda" {
-  function_name = var.lambda_function_name
-  role          = aws_iam_role.lambda_exec.arn
-
-  package_type = "Image"
-  image_uri    = "<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/daily-news-agent:latest"
-
-  architectures = ["x86_64"]
-
-  timeout     = 60
-  memory_size = 512
-
-  environment {
-    variables = {
-      SES_SENDER     = var.email_sender
-      SES_RECEIVER   = var.email_receiver
-      GOOGLE_API_KEY = var.google_api_key
-    }
-  }
-}
+```bash
+LAMBDA_PLATFORM=manylinux2014_aarch64 ./package.sh
 ```
 
----
+For ARM64 with Python 3.12:
 
-# 🚀 Deploy
-
-```
-terraform apply
+```bash
+LAMBDA_PYTHON_VERSION=3.12 LAMBDA_PLATFORM=manylinux2014_aarch64 ./package.sh
 ```
 
----
+Make sure these match your Lambda function settings.
 
-# 🧠 Common Issues & Fixes
+## Why The Packaging Script Matters
 
-## ❌ Error: `RequestEntityTooLargeException`
+Some dependencies, especially `pydantic_core`, include compiled native files. If you run a normal `pip install` on macOS, pip may install macOS binaries. Lambda needs Linux binaries.
 
-👉 Zip too big → use Docker
+The common failure looks like:
 
----
-
-## ❌ Error: `image manifest not supported`
-
-👉 OCI format → rebuild using:
-
-```
-docker buildx build --platform linux/amd64 --provenance=false --output=type=docker -t daily-news-agent .
+```text
+Unable to import module 'handler': No module named 'pydantic_core._pydantic_core'
 ```
 
----
+The fix is to build the zip with Lambda Linux wheels, which `package.sh` now does.
 
-## ❌ Lambda not triggering
+You can verify the zip contains the Linux binary:
 
-👉 Check EventBridge cron (UTC vs IST)
-
----
-
-## ❌ Email not sending
-
-👉 Verify SES email + IAM permissions
-
----
-
-# 🧹 Cleanup (Optional)
-
-## Delete local images
-
-```
-docker system prune -a -f
+```bash
+unzip -l lambda.zip | grep 'pydantic_core/_pydantic_core'
 ```
 
----
+Expected for Python 3.13 x86_64:
 
-## Delete ECR repo
-
-```
-aws ecr delete-repository \
-  --repository-name daily-news-agent \
-  --region ap-south-1 \
-  --force
+```text
+pydantic_core/_pydantic_core.cpython-313-x86_64-linux-gnu.so
 ```
 
----
+## Deploy
 
-# 📌 Key Learnings
+Upload `lambda.zip` to your Lambda function.
 
-- Docker Lambda removes deployment limits
-- Mac builds ARM by default → must force AMD64
-- Lambda only supports Docker V2 image format
-- Terraform manages infra, not image build
+Handler:
 
----
+```text
+handler.lambda_handler
+```
 
-# 🚀 Future Improvements
+Recommended settings:
 
-- Better email formatting (HTML)
-- Add stock portfolio insights
-- Store history in S3/DynamoDB
-- CI/CD with GitHub Actions
+```text
+Runtime: Python 3.13
+Architecture: x86_64
+Timeout: 60 seconds or higher
+Memory: 512 MB or higher
+```
 
----
+## Common Issues
 
-# 🧠 Author
+### `pydantic_core._pydantic_core` import error
 
-Aditya Joshi
-Built as part of AI + Cloud learning journey 🚀
+The zip was probably built for macOS or the wrong Lambda runtime/architecture. Rebuild with:
+
+```bash
+./package.sh
+```
+
+For Python 3.12 or ARM64, use the environment overrides shown above.
+
+### Email not sending
+
+Check:
+
+- SES sender verification
+- SES sandbox restrictions
+- Lambda IAM permission for `ses:SendEmail`
+- Region matches `ap-south-1` in `lambda/email_service.py`
+
+### Empty or failed news fetch
+
+The RSS fetch uses Google News RSS over the network. Make sure the Lambda has outbound internet access. If the function is inside a VPC, it may need NAT access.
+
+## Notes
+
+- RSS parsing uses Python standard library XML parsing, not `feedparser`, to avoid extra packaging complications.
+- `lambda.zip` is intentionally not expected to include `google-adk`, `boto3`, `botocore`, or `feedparser`.
+- The current zip is small enough for normal Lambda zip deployment.
