@@ -14,10 +14,7 @@ logger = logging.getLogger(__name__)
 def generate_email_content():
     logger.info("Generating email content")
 
-    client = genai.Client(
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        http_options=HttpOptions(api_version="v1beta"),
-    )
+    client = genai.Client()
 
     ai_news, market_news = get_news()
 
