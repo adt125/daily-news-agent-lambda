@@ -1,48 +1,34 @@
 from google import genai
-from google.genai.types import HttpOptions
+from google.genai.types import GenerateContentConfig, HttpOptions
 from dotenv import load_dotenv, find_dotenv
 from news_service import get_news
-from html_formatter import generate_html_email
+from models import EmailDigest
+import logging
 import os
 import json
 
 load_dotenv(find_dotenv())
+logger = logging.getLogger(__name__)
 
 
 def generate_email_content():
+    logger.info("Generating email content")
+
     client = genai.Client(
-        api_key=os.getenv("GOOGLE_API_KEY"), http_options=HttpOptions(api_version="v1")
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        http_options=HttpOptions(api_version="v1beta"),
     )
 
     ai_news, market_news = get_news()
 
     prompt = f"""
-Return ONLY valid JSON. No explanation.
-
-Format:
-{{
-  "ai": [
-    {{
-      "title": "",
-      "summary": "",
-      "link": ""
-    }}
-  ],
-  "market": [
-    {{
-      "title": "",
-      "summary": "",
-      "link": ""
-    }}
-  ]
-}}
+Create a daily news email digest from the input.
 
 Rules:
-- 5 AI items, 3 market items
+- 5 AI items, 5 market items
 - Summary must be 2-3 lines
 - Use EXACT links from input
 - Do NOT modify links
-- No markdown, no extra text
 
 INPUT:
 
@@ -53,20 +39,39 @@ Market News:
 {market_news}
 """
 
-    response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-
-    # Parse JSON safely
     try:
-        data = json.loads(response.text)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=EmailDigest,
+                temperature=0.2,
+            ),
+        )
     except Exception:
-        print("Invalid JSON from model:\n", response.text)
+        logger.exception("Gemini request failed")
         raise
 
+    logger.info("Gemini response received")
+
+    try:
+        if response.parsed:
+            data = response.parsed.model_dump()
+        else:
+            data = EmailDigest.model_validate(json.loads(response.text)).model_dump()
+    except Exception:
+        logger.exception("Gemini returned invalid JSON: %s", response.text)
+        raise
+
+    logger.info(
+        "Gemini JSON parsed. AI items=%s Market items=%s",
+        len(data.get("ai", [])),
+        len(data.get("market", [])),
+    )
     return data
 
 
 if __name__ == "__main__":
     structured_data = generate_email_content()
-    html_email = generate_html_email(structured_data)
-
-    print(html_email)  # or pass to SES
+    print(json.dumps(structured_data, indent=2))

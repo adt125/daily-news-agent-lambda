@@ -1,4 +1,13 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def generate_html_email(data):
+    ai_count = len(data.get("ai", []))
+    market_count = len(data.get("market", []))
+    logger.info("Generating HTML email. AI items=%s Market items=%s", ai_count, market_count)
+
     def render_section(title, items):
         section_html = f"<h2 style='margin-top:20px;'>{title}</h2>"
 
@@ -36,4 +45,5 @@ def generate_html_email(data):
     </html>
     """
 
+    logger.info("HTML email generated")
     return html
