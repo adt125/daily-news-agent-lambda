@@ -1,7 +1,7 @@
 import boto3
 import logging
 from botocore.exceptions import ClientError
-from config import SES_SENDER, SES_RECEIVER
+from config import SES_SENDER, SES_RECEIVERS
 from html_formatter import generate_html_email
 
 logger = logging.getLogger(__name__)
@@ -10,12 +10,15 @@ ses = boto3.client("ses", region_name="ap-south-1")
 
 def send_email(content):
     html_email_content = generate_html_email(content)
-    logger.info("Sending email through SES")
+    if not SES_RECEIVERS:
+        raise ValueError("Set SES_RECEIVERS or SES_RECEIVER before sending email")
+
+    logger.info("Sending email through SES to %s recipient(s)", len(SES_RECEIVERS))
 
     try:
         response = ses.send_email(
             Source=SES_SENDER,
-            Destination={"ToAddresses": [SES_RECEIVER]},
+            Destination={"ToAddresses": SES_RECEIVERS},
             Message={
                 "Subject": {"Data": "Daily News Digest"},
                 "Body": {"Html": {"Data": html_email_content}},

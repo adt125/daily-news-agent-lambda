@@ -34,20 +34,34 @@ Configure these in Lambda:
 ```text
 GOOGLE_API_KEY=<your Gemini API key>
 SES_SENDER=<verified SES sender email>
-SES_RECEIVER=<recipient email>
+SES_RECEIVERS=<recipient1@example.com,recipient2@example.com>
 ```
 
-`SES_SENDER` and `SES_RECEIVER` must be valid for your SES setup. If SES is still in sandbox mode, both addresses usually need to be verified.
+`SES_SENDER` and every address in `SES_RECEIVERS` must be valid for your SES setup. If SES is still in sandbox mode, the sender and all recipients usually need to be verified.
+
+For backward compatibility, `SES_RECEIVER=<recipient email>` still works when `SES_RECEIVERS` is not set.
+
+With Terraform, pass multiple recipients as a list:
+
+```hcl
+email_receivers = [
+  "recipient1@example.com",
+  "recipient2@example.com",
+]
+```
 
 ## Dependencies
 
 `requirements.txt` intentionally stays small:
 
 ```text
-google-genai
+google-genai>=1.66.0,<2.0.0
+cryptography>=46.0.0,<48.0.0
 boto3
 python-dotenv
 ```
+
+`google-genai` is pinned to the current 1.x line because `google-cloud-aiplatform` requires `google-genai>=1.66.0,<2.0.0`. `cryptography` is capped below 48 to remain compatible with `pyOpenSSL 26.1.0`.
 
 `boto3` is listed for local development, but `package.sh` excludes it from the zip because AWS Lambda already includes `boto3` and `botocore` in the Python runtime.
 

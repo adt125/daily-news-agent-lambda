@@ -3,5 +3,11 @@ variable "lambda_function_name" {
 }
 
 variable "email_sender" {}
-variable "email_receiver" {}
+variable "email_receiver" {
+  default = ""
+}
+variable "email_receivers" {
+  type    = list(string)
+  default = []
+}
 variable "google_api_key" {}
